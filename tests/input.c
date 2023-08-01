@@ -7,29 +7,51 @@
 //
 // License: MIT
 //=============================================================================
-int
-foo(int a) {
-  return a * 2;
+#include <stdlib.h>
+
+int 
+bar(int c) 
+{
+  return c * c;
 }
 
 int
-bar(int a, int b) {
-  return (a + foo(b) * 2);
+foo(int a) 
+{
+  if (a < 0)
+  {
+    a = -a;
+  }
+
+  else 
+  {
+    exit(1);
+  }
+
+  int c = 3;
+  int val = bar(c); 
+  for (int i = 0; i < a; ++i)
+    val += a;
+
+  return val;
 }
 
 int
-fez(int a, int b, int c) {
-  return (a + bar(a, b) * 2 + c * 3);
-}
+fact(int a)
+{
+  if (a == 1)
+    return 1;
 
-int
-main(int argc, char *argv[]) {
-  int a = 123;
-  int ret = 0;
+  int val = foo(a) * fact(a - 1);
+  if (a == 10) 
+  {
+    val *= fact(val);
+  }
 
-  ret += foo(a);
-  ret += bar(a, ret);
-  ret += fez(a, ret, 123);
+  else if (a == 15)
+  {
+    exit (15);
+  }
 
-  return ret;
+  return val;
 }

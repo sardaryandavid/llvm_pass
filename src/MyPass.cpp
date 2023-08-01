@@ -1,87 +1,116 @@
 /**
  * Скелет прохода для LLVM.
  */
+#include <map>
+#include <stack>
+#include <iostream>
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
-/* Так как мы пишем библиотеку, то можно выбрать анонимную область видимости */
 namespace {
- 
-/**
- * Определяет, что будем делать при посещении функции. 
- */
-void 
-VisitFunction( Function &F) 
-{
-    /* LLVM использует кастомные потоки вывода. 
-     * llvm::errs() (поток ошибок), 
-     * llvm::outs() (аналогичен стандартному stdout), 
-     * llvm::nulls() (отбрасывает весь вывод) */
-    errs() << "Function name: " << F.getName() << "\n";
-    errs() << "    number of arguments: " << F.arg_size() << "\n";
-} /* VisitFunction */
 
-/**
- * Структура, необходимая для регистрации своего прохода в менеджере проходов.
- */
-struct MyPass : PassInfoMixin<MyPass> 
+void 
+printStack(std::stack<std::string> stack) 
 {
-    /* PreservedAnalyses - множество анализов, которые сохраняются после данного прохода,
-     * чтобы не запускать их заново.
-     *
-     * run() непосредственно нужен для запуска прохода.
-     *
-     * Так как мы просто хотим вывести: "имя функции - количество аргументов", то мы 
-     * возвращаем all(), что говорит о том, что ни один анализ не будет испорчен */
-    PreservedAnalyses 
-    run( Function &Function, 
-	 FunctionAnalysisManager &AnalysisManager) 
+    while (!stack.empty()) 
     {
-        VisitFunction( Function);
+        errs() << stack.top() << "\n";
+        stack.pop();
+    }
+}
+
+void 
+dfsWalk(
+    const BasicBlock& BB,
+    std::map<std::string, std::string>& colour,
+    std::stack<std::string>& order) 
+{
+    colour[BB.getName().data()] = "grey";
+    const Instruction* TInst = BB.getTerminator();
+    for (int i = 0, n = TInst->getNumSuccessors(); i < n; ++i) 
+    {
+        BasicBlock *Succ  = TInst->getSuccessor(i); 
+        if (colour[Succ->getName().data()] == "grey") 
+        {
+            errs() << "CYCLE: " << BB.getName() << " -> " << Succ->getName() << "\n"; 
+        }
+
+        if (colour[Succ->getName().data()] == "white")
+        {
+            dfsWalk(*Succ, colour, order);
+        }
+    }
+
+    order.push(BB.getName().data());
+    colour[BB.getName().data()] = "black";
+}
+
+void
+printMap(const std::map<std::string, size_t>& map)
+{
+    for (auto it = map.cbegin(); it != map.cend(); ++it) 
+    {
+        std::cout << it->first << " " << it->second << "\n"; 
+    }
+}
+
+void 
+VisitFunction(Function &F) 
+{
+    errs() << "Function name: " << F.getName() << "\n";
+
+    std::map<std::string, size_t> instructionFrequency;
+    std::map<std::string, std::string> colour;
+    std::stack<std::string> order;
+    int BB_num = 1;
+    for (auto &BB: F) 
+    {
+        BB.setName(std::to_string(BB_num++));
+        colour[BB.getName().data()] = "white";
+
+        for (auto &Inst: BB )
+        {
+            StringRef Name = Inst.getOpcodeName();
+            instructionFrequency[Name.data()] += 1;
+        }
+    }
+
+    dfsWalk(F.getEntryBlock(), colour, order);
+    printStack(order);
+    printMap(instructionFrequency);
+}
+
+struct MyPass : PassInfoMixin<MyPass>
+{
+    PreservedAnalyses 
+    run(Function &Function, 
+	 FunctionAnalysisManager &AnalysisManager)
+    {
+        VisitFunction(Function);
         return (PreservedAnalyses::all());
     }
 
-    /* По умолчанию данный проход будет пропущен, если функция помечена атрибутом 
-     * optnone (не производить оптимизаций над ней). Поэтому необходимо вернуть true, 
-     * чтобы мы могли обходить и их. 
-     * (в режиме сборки -O0 все функции помечены как неоптимизируемые) */
     static bool 
-    isRequired( void) 
+    isRequired(void) 
     { 
         return (true); 
     }
 };
 } /* namespace */
 
-/**
- * Наш проход будет реализован в виде отдельно подключаемого плагина (расширения языка).
- * Это удобный способ расширить возможности компилятора. Например, сделать поддержку
- * своей прагмы, своей оптимизации, выдачи своего предупреждения.
- *
- * PassPluginLibraryInfo - структура, задающая базовые параметры для нашего плагина.
- * Её надо составить из:
- * - Версии API (для отслеживания совместимости ABI можно 
- *   использовать LLVM_PLUGIN_API_VERSION)
- * - Имя плагина
- * - Версии плагина
- * - Callback для регистрации плагина через PassBuilder
- */
-/**
- * По-модному это делают с помощью лямбда-функции, но можно и по-старинке.
- */
 bool
 CallBackForPipelineParser( 
     StringRef Name, 
     FunctionPassManager &FPM,  
     ArrayRef<PassBuilder::PipelineElement>)
 {
-    if ( Name == "MyPass" )
+    if (Name == "MyPass" )
     {
         FPM.addPass( MyPass());
-	return (true);
+	    return (true);
     } else
     {
         return (false);
@@ -89,13 +118,13 @@ CallBackForPipelineParser(
 } /* CallBackForPipelineParser */
 
 void
-CallBackForPassBuilder( PassBuilder &PB)
+CallBackForPassBuilder(PassBuilder &PB)
 {
     PB.registerPipelineParsingCallback( &CallBackForPipelineParser); 
 } /* CallBackForPassBuider */
 
 PassPluginLibraryInfo 
-getMyPassPluginInfo( void)
+getMyPassPluginInfo(void)
 {
     uint32_t     APIversion =  LLVM_PLUGIN_API_VERSION;
     const char * PluginName =  "MyPass";
@@ -112,10 +141,6 @@ getMyPassPluginInfo( void)
   return (info);
 } /* getMyPassPluginInfo */
 
-/**
- * Интерфейс, который гарантирует, что "opt" распознаст наш проход. 
- * "-passes=MyPass"
- */
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() 
 {
